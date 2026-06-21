@@ -1,0 +1,351 @@
+{% extends "base.html" %}
+{% block title %}代码审查 - {{ exam.title }}{% endblock %}
+{% block extra_head %}
+<style>
+#reviewTop { background: #f8f9fa; border-bottom: 2px solid #dee2e6; padding-bottom: 10px; margin-bottom: 10px; }
+#allSubmissions { max-height: 42vh; overflow-y: auto; }
+#codeView { overflow: auto; font-size: 0.82rem; white-space: pre; }
+#radarChart { height: 326px; }
+#forceChart { height: 326px; }
+#forceChartCard > .card-body { overflow: visible; }
+#forceChartCard { overflow: visible; }
+.kp-pills-wrap { display: inline-block; max-height: 3.4em; overflow-y: auto; line-height: 1.4; vertical-align: top; }
+/* Make chart cards stretch to fill column height, bottom aligns with student code card */
+#reviewTop > :nth-child(4),
+#reviewTop > :nth-child(5) { display: flex; }
+#reviewTop > :nth-child(4) > .card,
+#reviewTop > :nth-child(5) > .card { flex: 1; display: flex; flex-direction: column; }
+#reviewTop > :nth-child(4) .card-body,
+#reviewTop > :nth-child(5) .card-body { flex: 1; }
+.submission-row { cursor: pointer; }
+.submission-row:hover { background: #e3f2fd !important; }
+.submission-row.selected { background: #bbdefb !important; }
+.dim-good { color: #4CAF50; font-weight: bold; }
+.dim-ok { color: #FF9800; }
+.dim-bad { color: #F44336; }
+.kp-pill { display: inline-block; padding: 2px 6px; margin: 1px 2px; border-radius: 10px; font-size: 0.7rem; color: #fff; }
+.kp-pill.good { background: #4CAF50; }
+.kp-pill.ok { background: #FF9800; }
+.kp-pill.bad { background: #F44336; }
+.kp-pill.none { background: #9e9e9e; }
+</style>
+{% endblock %}
+{% block content %}
+<h2>{{ exam.title }} - 编程题代码审查
+    <a href="{{ url_for('teacher_exam_results', exam_id=exam.id) }}" class="btn btn-outline-secondary btn-sm ms-3"><i class="bi bi-arrow-left"></i> 返回成绩</a>
+</h2>
+
+<div id="reviewTop" class="row g-2">
+    <div class="col-md-2">
+        <label class="form-label small fw-bold">选择题目</label>
+        <select id="questionSelect" class="form-select form-select-sm">
+            <option value="">-- 选择编程题 --</option>
+            {% for q in prog_qs %}
+            <option value="{{ loop.index0 }}">{{ q.title[:40] }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-2">
+        <label class="form-label small fw-bold">选择学生</label>
+        <select id="studentSelect" class="form-select form-select-sm">
+            <option value="">-- 选择学生 --</option>
+            {% for s in ses %}
+            <option value="{{ s.id }}">{{ s.display_name or s.username }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-8"></div>
+
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header py-1 px-2 small fw-bold">代码质量 - 雷达图</div>
+            <div class="card-body p-2"><div id="radarChart"></div></div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm" id="forceChartCard">
+            <div class="card-header py-1 px-2 d-flex justify-content-between align-items-center">
+                <span class="fw-bold small">知识图谱 - 力导向图 <span id="kpStudentName" class="text-muted fw-normal"></span></span>
+                <small class="text-muted">点击节点查看题目</small>
+            </div>
+            <div class="card-body p-2" style="position:relative;">
+                <div id="forceChart"></div>
+                <div id="forceLegend" style="position:absolute; left:6px; bottom:4px; font-size:12px; display:none;">
+                    <span style="color:#4CAF50;">&#9679;</span> 基础
+                    <span style="color:#FF9800; margin-left:6px;">&#9679;</span> 进阶
+                    <span style="color:#F44336; margin-left:6px;">&#9679;</span> 高级
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 d-flex flex-column">
+        <div class="card border-0 shadow-sm mb-2 flex-shrink-0">
+            <div class="card-header py-1 px-2 small fw-bold">AI检测 & 知识掌握</div>
+            <div class="card-body p-1" id="aiResult" style="font-size:0.8rem;">
+                <span class="text-muted">请从下方表格选择学生</span>
+            </div>
+        </div>
+        <div class="card border-0 shadow-sm flex-grow-1 d-flex flex-column">
+            <div class="card-header py-1 px-2 small fw-bold flex-shrink-0">学生代码 <span class="text-muted fw-normal" id="codeHint">— 点击表格查看</span></div>
+            <div class="card-body p-1"><pre class="mb-0" style="max-height:250px;overflow:auto;"><code id="codeView"></code></pre></div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header py-1 px-3 d-flex justify-content-between align-items-center">
+        <span class="fw-bold small">全部学生代码一览</span>
+        <small class="text-muted">点击行或"查看"按钮</small>
+    </div>
+    <div class="card-body p-1" id="allSubmissions"></div>
+</div>
+
+<div class="modal fade" id="kpQuestionsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg"><div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">关联题目</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body" id="kpQuestionsBody"></div>
+    </div></div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+let allData = null;
+let currentQi = null;
+let currentStudentId = null;
+let radarChart = echarts.init(document.getElementById('radarChart'));
+let forceChart = echarts.init(document.getElementById('forceChart'));
+
+// Show placeholder in force graph
+forceChart.setOption({
+    title: { text: '请选择学生查看知识图谱', left: 'center', top: 'center', textStyle: { color: '#999', fontSize: 14 } }
+});
+
+fetch('/api/exam/{{ exam.id }}/code_review_data').then(function(r) { return r.json(); }).then(function(d) {
+    allData = d;
+    renderAllSubmissions();
+    // Auto-select first student
+    if (allData.questions.length > 0) {
+        var firstQ = allData.questions[0];
+        if (firstQ.submissions.length > 0) {
+            var firstSub = firstQ.submissions[0];
+            showCode(0, firstSub.student, firstSub.student_id || 0);
+        }
+    }
+});
+
+window.addEventListener('resize', function() {
+    radarChart.resize();
+    forceChart.resize();
+    alignChartHeights();
+});
+
+function dimClass(v) {
+    return v >= 80 ? 'dim-good' : v >= 50 ? 'dim-ok' : 'dim-bad';
+}
+
+function renderAllSubmissions() {
+    if (!allData) return;
+    var html = '';
+    allData.questions.forEach(function(q, qi) {
+        html += '<h6 class="mt-2 mb-1 px-2">' + q.question_title + '</h6>';
+        html += '<div class="table-responsive"><table class="table table-sm table-hover mb-1"><thead class="table-light"><tr><th style="width:100px">学生</th><th style="width:48px">得分</th><th style="width:42px">AI?</th><th>命名</th><th>结构</th><th>注释</th><th>复杂度</th><th>简洁</th><th>类型注解</th><th style="width:60px">代码</th></tr></thead><tbody>';
+        q.submissions.forEach(function(s) {
+            var hasCode = s.code && s.code.trim();
+            var aiBadge = hasCode ? (s.is_ai ? '<span class="badge bg-danger">AI</span>' : '<span class="badge bg-success">人工</span>') : '<span class="badge bg-secondary">未答</span>';
+            html += '<tr class="submission-row" data-qi="' + qi + '" data-sid="' + (s.student_id || '') + '" data-student="' + s.student.replace(/"/g, '&quot;') + '" onclick="showCode(' + qi + ',\'' + s.student.replace(/'/g,"\\'") + '\',' + (s.student_id || 0) + ')">';
+            html += '<td>' + s.student + '</td>';
+            html += '<td><strong>' + (s.score != null ? s.score.toFixed(1) : '-') + '</strong></td>';
+            html += '<td>' + aiBadge + '</td>';
+            ['naming','structure','comments','complexity','conciseness','type_hints'].forEach(function(k) {
+                html += '<td class="' + dimClass(s.quality[k]) + '">' + s.quality[k] + '</td>';
+            });
+            html += '<td><button class="btn btn-sm btn-outline-secondary py-0 px-1 text-nowrap" onclick="event.stopPropagation(); showCode(' + qi + ',\'' + s.student.replace(/'/g,"\\'") + '\',' + (s.student_id || 0) + ')">查看</button></td></tr>';
+        });
+        html += '</tbody></table></div>';
+    });
+    document.getElementById('allSubmissions').innerHTML = html;
+}
+
+function loadKnowledgeGraph(studentId, studentName) {
+    if (!studentId) return;
+    document.getElementById('kpStudentName').textContent = '— ' + studentName;
+
+    fetch('/api/knowledge_graph/' + studentId).then(function(r) { return r.json(); }).then(function(data) {
+        var nodes = data.nodes || [];
+
+        // Update pills in AI area
+        var allKps = nodes.slice();
+        allKps.sort(function(a, b) { return (a.rate || 0) - (b.rate || 0); });
+        var pills = '';
+        allKps.slice(0, 10).forEach(function(kp) {
+            var cls = kp.rate >= 80 ? 'good' : kp.rate >= 40 ? 'ok' : kp.rate > 0 ? 'bad' : 'none';
+            pills += '<span class="kp-pill ' + cls + '" title="' + kp.name + ': ' + (kp.rate || 0) + '%">' + kp.name + ' ' + (kp.rate || 0) + '%</span> ';
+        });
+        if (allKps.length > 10) pills += '<span class="kp-pill none">+更多</span>';
+
+        var aiHtml = document.getElementById('aiResult').innerHTML;
+        var aiDiv = '';
+        var alertMatch = aiHtml.match(/(<div class="alert[^>]*>.*?<\/div>)/);
+        if (alertMatch) aiDiv = alertMatch[0];
+
+        document.getElementById('aiResult').innerHTML = aiDiv +
+            '<div style="margin-top:4px;"><span class="small fw-bold">知识掌握:</span> <span class="kp-pills-wrap">' + pills + '</span></div>';
+
+        // Render force-directed graph (scaled down for review panel)
+        var catIndex = {'basic': 0, 'intermediate': 1, 'advanced': 2};
+        var graphNodes = nodes.map(function(n) {
+            return {
+                name: n.name,
+                symbolSize: 10 + n.rate * 0.1,
+                itemStyle: n.itemStyle,
+                category: catIndex[n.category] || 0,
+                description: n.description,
+                rate: n.rate,
+                id: n.id,
+                label: { show: true, fontSize: 9 }
+            };
+        });
+        var categories = [
+            {name: '基础', itemStyle: {color: '#4CAF50'}},
+            {name: '进阶', itemStyle: {color: '#FF9800'}},
+            {name: '高级', itemStyle: {color: '#F44336'}}
+        ];
+
+        forceChart.setOption({
+            title: null,
+            tooltip: {
+                formatter: function(p) {
+                    if (p.dataType === 'node') {
+                        return '<strong>' + p.name + '</strong><br/>正确率: ' + (p.data.rate || 0) + '%<br/>' + (p.data.description || '');
+                    }
+                    return '';
+                }
+            },
+            series: [{
+                type: 'graph', layout: 'force', roam: 'move', draggable: true,
+                top: 10,
+                bottom: 70,
+                force: { repulsion: 300, gravity: 0.15, edgeLength: [50, 100] },
+                data: graphNodes,
+                links: data.links.map(function(l) { return {source: l.source, target: l.target}; }),
+                categories: categories,
+                label: { show: true, position: 'right', fontSize: 10 }
+            }]
+        }, {notMerge: true});
+
+        document.getElementById('forceLegend').style.display = 'block';
+
+        forceChart.off('click');
+        forceChart.on('click', function(params) {
+            if (params.dataType === 'node') {
+                var kpId = params.data.id;
+                fetch('/api/knowledge_graph/' + currentStudentId + '/questions/' + kpId).then(function(r) { return r.json(); }).then(function(qs) {
+                    var html = '<table class="table table-sm"><thead><tr><th>题目</th><th>类型</th><th>难度</th><th>最近作答</th></tr></thead><tbody>';
+                    qs.forEach(function(q) {
+                        var status = q.last_correct === null ? '<span class="badge bg-secondary">未做</span>' :
+                                     q.last_correct ? '<span class="badge bg-success">正确</span>' :
+                                     '<span class="badge bg-danger">错误</span>';
+                        html += '<tr><td>' + q.title.substring(0, 60) + '</td><td>' + q.type + '</td><td>' + '★'.repeat(q.difficulty) + '</td><td>' + status + '</td></tr>';
+                    });
+                    html += '</tbody></table>';
+                    document.getElementById('kpQuestionsBody').innerHTML = html;
+                    new bootstrap.Modal(document.getElementById('kpQuestionsModal')).show();
+                });
+            }
+        });
+
+        alignChartHeights();
+    });
+}
+
+function alignChartHeights() {
+    var radarBody = document.getElementById('radarChart').parentNode;
+    var forceBody = document.getElementById('forceChart').parentNode;
+    if (!radarBody || !forceBody) return;
+
+    var bodyHeight = radarBody.offsetHeight;
+    if (bodyHeight < 326) bodyHeight = 326;
+
+    var radar = document.getElementById('radarChart');
+    var force = document.getElementById('forceChart');
+    if (radar.offsetHeight !== bodyHeight) {
+        radar.style.height = bodyHeight + 'px';
+        force.style.height = bodyHeight + 'px';
+        radarChart.resize();
+        forceChart.resize();
+    }
+}
+
+function showCode(qi, student, studentId) {
+    if (!allData) return;
+    var q = allData.questions[qi];
+    if (!q) return;
+    var sub = q.submissions.find(function(s) { return s.student === student; });
+    if (!sub) return;
+
+    currentQi = qi;
+    currentStudentId = studentId || sub.student_id;
+
+    // Highlight selected row
+    document.querySelectorAll('.submission-row').forEach(function(r) { r.classList.remove('selected'); });
+    var row = document.querySelector('.submission-row[data-qi="' + qi + '"][data-sid="' + (studentId || sub.student_id || '') + '"]');
+    if (row) row.classList.add('selected');
+
+    // Sync dropdowns
+    document.getElementById('questionSelect').value = qi;
+    var sel = document.getElementById('studentSelect');
+    for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].textContent === student) { sel.value = sel.options[i].value; break; }
+    }
+
+    var hasCode = sub.code && sub.code.trim();
+
+    // Code view
+    document.getElementById('codeView').textContent = sub.code || '(未作答)';
+    document.getElementById('codeHint').textContent = hasCode ? '' : ' — 未提交代码';
+
+    // Radar chart
+    var qv = sub.quality;
+    radarChart.setOption({
+        radar: { indicator: [
+            {name:'命名',max:100},{name:'结构',max:100},{name:'注释',max:100},
+            {name:'复杂度',max:100},{name:'简洁',max:100},{name:'类型注解',max:100}
+        ]},
+        series: [{type:'radar',data:[{value:[qv.naming,qv.structure,qv.comments,qv.complexity,qv.conciseness,qv.type_hints],name:student,areaStyle:{opacity:0.2}}]}]
+    });
+
+    // AI result
+    var aiHtml;
+    if (!hasCode) {
+        aiHtml = '<div class="alert alert-secondary py-1 mb-0 small">未提交代码</div>';
+    } else if (sub.is_ai) {
+        aiHtml = '<div class="alert alert-danger py-1 mb-0 small">高度疑似AI代码 — 命中 ' + sub.ai_flags + '/5 项指标</div>';
+    } else {
+        aiHtml = '<div class="alert alert-success py-1 mb-0 small">正常代码</div>';
+    }
+    document.getElementById('aiResult').innerHTML = aiHtml + '<div class="text-muted small mt-1">加载知识图谱...</div>';
+
+    // Load knowledge graph
+    if (currentStudentId) {
+        loadKnowledgeGraph(currentStudentId, student);
+    }
+}
+
+document.getElementById('questionSelect').addEventListener('change', function() {
+    var qi = parseInt(this.value);
+    if (isNaN(qi)) return;
+    var sel = document.getElementById('studentSelect');
+    var student = sel.options[sel.selectedIndex].textContent;
+    if (student === '-- 选择学生 --') return;
+    var sub = allData.questions[qi].submissions.find(function(s) { return s.student === student; });
+    showCode(qi, student, sub ? sub.student_id : null);
+});
+document.getElementById('studentSelect').addEventListener('change', function() {
+    var qi = parseInt(document.getElementById('questionSelect').value);
+    if (isNaN(qi)) return;
+    var student = this.options[this.selectedIndex].textContent;
+    var sub = allData.questions[qi].submissions.find(function(s) { return s.student === student; });
+    showCode(qi, student, sub ? sub.student_id : null);
+});
+</script>
+{% endblock %}

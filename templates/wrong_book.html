@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block title %}错题本{% endblock %}
+{% block content %}
+<h2>错题本
+    <a href="{{ url_for('student_dashboard') }}" class="btn btn-outline-secondary btn-sm ms-3"><i class="bi bi-arrow-left"></i> 返回仪表盘</a>
+    {% if items %}
+    <button id="batchDeleteBtn" class="btn btn-danger btn-sm ms-2" disabled onclick="batchDelete()">
+        <i class="bi bi-trash"></i> 批量删除
+    </button>
+    {% endif %}
+</h2>
+{% if items %}
+<div class="table-responsive">
+    <table class="table table-hover">
+        <thead><tr>
+            <th style="width:40px"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)"></th>
+            <th>#</th><th>题型</th><th>题目</th><th>你的答案</th><th>正确答案</th><th>掌握状态</th><th>操作</th>
+        </tr></thead>
+        <tbody>
+        {% for item in items %}
+        <tr id="wb-row-{{ item.id }}">
+            <td><input type="checkbox" class="wb-checkbox" value="{{ item.id }}" onchange="onCheckChange()"></td>
+            <td>{{ loop.index }}</td>
+            <td>
+                <span class="badge bg-{% if item.type=='single_choice' %}primary{% elif item.type=='multi_choice' %}info{% elif item.type=='true_false' %}success{% elif item.type=='fill_blank' %}warning{% else %}danger{% endif %}">
+                    {{ {'single_choice':'单选','multi_choice':'多选','true_false':'判断','fill_blank':'填空','programming':'编程'}[item.type] }}
+                </span>
+            </td>
+            <td style="max-width:300px;">{{ item.title[:60] }}</td>
+            <td>{{ item.student_answer or '未作答' }}</td>
+            <td class="text-success">{{ item.correct_answer }}</td>
+            <td>
+                {% if item.mastered %}
+                <span class="badge bg-success">已掌握</span>
+                {% else %}
+                <span class="badge bg-warning">未掌握</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if not item.mastered %}
+                <span class="badge bg-primary" style="cursor:pointer" onclick="startRedo({{ item.question_id }}, {{ item.id }})">重做</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p class="text-muted">暂无错题</p>
+{% endif %}
+
+<div class="modal fade" id="redoModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title" id="redoTitle">重做</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body" id="redoBody"></div>
+    </div></div>
+</div>
+
+<div class="modal fade" id="confirmDeleteModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">确认删除</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body"><p id="confirmDeleteMsg"></p></div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+            <button type="button" class="btn btn-danger" id="confirmDeleteBtn">确认删除</button>
+        </div>
+    </div></div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+let currentWbId = null;
+let redoTimer = null;
+let needReload = false;
+
+document.getElementById('redoModal').addEventListener('hidden.bs.modal', function() {
+    if (redoTimer) { clearInterval(redoTimer); redoTimer = null; }
+    if (needReload) { needReload = false; location.reload(); }
+});
+
+function startRedo(qid, wbId) {
+    currentWbId = wbId;
+    document.getElementById('redoBody').innerHTML = '<p class="text-muted text-center">加载中...</p>';
+    document.getElementById('redoTitle').textContent = '重做';
+    new bootstrap.Modal(document.getElementById('redoModal')).show();
+
+    fetch('/api/practice/question/' + qid).then(r => {
+        if (!r.ok) throw new Error('请求失败 ' + r.status);
+        return r.json();
+    }).then(q => {
+        if (!q.ok) { alert(q.msg); return; }
+        let typeNames = {single_choice:'单选题', multi_choice:'多选题', true_false:'判断题', fill_blank:'填空题', programming:'编程题'};
+        document.getElementById('redoTitle').textContent = '重做 — ' + (typeNames[q.type] || q.type);
+        let formHtml = '<form id="redoForm" onsubmit="checkRedo(event, ' + wbId + ')">';
+        formHtml += '<p class="fw-bold mb-2">' + q.title + '</p>';
+
+        if (q.type === 'single_choice' || q.type === 'multi_choice') {
+            let inputType = q.type === 'single_choice' ? 'radio' : 'checkbox';
+            q.options.forEach((opt, i) => {
+                let letter = String.fromCharCode(65 + i);
+                formHtml += '<div class="form-check"><input class="form-check-input" type="' + inputType + '" name="answer" value="' + letter + '" id="ropt' + i + '"><label class="form-check-label" for="ropt' + i + '">' + opt + '</label></div>';
+            });
+        } else if (q.type === 'true_false') {
+            formHtml += '<div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="answer" value="T" id="roptT"><label class="form-check-label" for="roptT">正确</label></div>';
+            formHtml += '<div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="answer" value="F" id="roptF"><label class="form-check-label" for="roptF">错误</label></div>';
+        } else if (q.type === 'fill_blank') {
+            formHtml += '<input type="text" class="form-control form-control-sm" name="answer" placeholder="请输入答案">';
+        } else if (q.type === 'programming') {
+            formHtml += '<textarea class="form-control form-control-sm" name="answer" rows="8" placeholder="请输入代码">' + (q.code_template || '') + '</textarea>';
+        }
+
+        formHtml += '<div class="mt-2"><button type="submit" class="btn btn-sm btn-primary">提交答案</button></div>';
+        formHtml += '</form><div id="redoResult" class="mt-2"></div>';
+        document.getElementById('redoBody').innerHTML = formHtml;
+    }).catch(function(err) {
+        document.getElementById('redoBody').innerHTML = '<div class="alert alert-danger small">加载题目失败: ' + err.message + '</div>';
+    });
+}
+
+function checkRedo(e, wbId) {
+    e.preventDefault();
+    let form = document.getElementById('redoForm');
+    let data = new FormData(form);
+    let answer;
+    let allAnswers = data.getAll('answer');
+    if (allAnswers.length > 1) {
+        answer = allAnswers.join(',');
+    } else {
+        answer = data.get('answer') || '';
+    }
+
+    document.getElementById('redoResult').innerHTML = '<p class="text-muted small">判题中...</p>';
+
+    fetch('/student/wrong_book/' + wbId + '/redo', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({answer: answer})
+    }).then(r => {
+        if (!r.ok) throw new Error('请求失败 ' + r.status);
+        return r.json();
+    }).then(res => {
+        if (!res.ok) { alert(res.msg || '操作失败'); return; }
+        let resultDiv = document.getElementById('redoResult');
+        if (res.correct) {
+            needReload = true;
+            let sec = 3;
+            resultDiv.innerHTML = '<div class="alert alert-success py-1 small">回答正确！已从错题本移除。<span id="countdownText">' + sec + '秒后自动关闭</span></div>';
+            redoTimer = setInterval(function() {
+                sec--;
+                if (sec <= 0) {
+                    clearInterval(redoTimer);
+                    redoTimer = null;
+                    bootstrap.Modal.getInstance(document.getElementById('redoModal')).hide();
+                } else {
+                    document.getElementById('countdownText').textContent = sec + '秒后自动关闭';
+                }
+            }, 1000);
+        } else {
+            resultDiv.innerHTML = '<div class="alert alert-danger py-1 small">回答错误，继续加油！正确答案：<strong>' + res.correct_answer + '</strong></div>';
+        }
+    }).catch(function(err) {
+        document.getElementById('redoResult').innerHTML = '<div class="alert alert-danger small">检查答案失败: ' + err.message + '</div>';
+    });
+}
+
+function toggleSelectAll(el) {
+    document.querySelectorAll('.wb-checkbox').forEach(function(cb) {
+        cb.checked = el.checked;
+    });
+    updateBatchBtn();
+}
+
+function onCheckChange() {
+    let all = document.querySelectorAll('.wb-checkbox');
+    let checked = document.querySelectorAll('.wb-checkbox:checked');
+    document.getElementById('selectAll').checked = all.length > 0 && checked.length === all.length;
+    updateBatchBtn();
+}
+
+function updateBatchBtn() {
+    let checked = document.querySelectorAll('.wb-checkbox:checked').length;
+    document.getElementById('batchDeleteBtn').disabled = checked === 0;
+}
+
+function batchDelete() {
+    let checked = document.querySelectorAll('.wb-checkbox:checked');
+    let ids = Array.from(checked).map(function(cb) { return parseInt(cb.value); });
+    if (ids.length === 0) return;
+    document.getElementById('confirmDeleteMsg').textContent = '确定要删除选中的 ' + ids.length + ' 道错题吗？此操作不可撤销。';
+    document.getElementById('confirmDeleteBtn').onclick = function() {
+        bootstrap.Modal.getInstance(document.getElementById('confirmDeleteModal')).hide();
+        fetch('/student/wrong_book/batch_delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ids: ids})
+        }).then(r => r.json()).then(res => {
+            if (res.ok) location.reload();
+        });
+    };
+    new bootstrap.Modal(document.getElementById('confirmDeleteModal')).show();
+}
+</script>
+{% endblock %}

@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}成绩分析 - {{ exam.title }}{% endblock %}
+{% block extra_head %}
+<style>
+.ai-capsule {
+    display: inline-flex; align-items: center;
+    height: 20px; min-width: 130px; max-width: 200px;
+    border-radius: 10px; position: relative; overflow: hidden;
+    background: #e9ecef; margin: 2px 4px 2px 0;
+    font-size: 0.68rem; line-height: 20px; vertical-align: middle;
+}
+.ai-capsule-fill {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    border-radius: 10px; transition: width 0.4s;
+}
+.ai-capsule-fill.low { background: #4CAF50; }
+.ai-capsule-fill.med { background: #FF9800; }
+.ai-capsule-fill.high { background: #F44336; }
+.ai-capsule-text {
+    position: relative; z-index: 1; padding: 0 8px;
+    color: #333; white-space: nowrap; font-weight: 500;
+}
+body[data-theme="dark"] .ai-capsule {
+    background: rgba(255,255,255,0.08);
+}
+body[data-theme="dark"] .ai-capsule-text {
+    color: #c0c8e0;
+}
+</style>
+{% endblock %}
+{% block content %}
+<h2>{{ exam.title }} - 成绩分析
+    <a href="{{ url_for('teacher_exam_results', exam_id=exam.id) }}" class="btn btn-outline-secondary btn-sm ms-3"><i class="bi bi-arrow-left"></i> 返回成绩</a>
+</h2>
+<ul class="nav nav-tabs mb-3" id="analysisTabs" role="tablist">
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-dist">成绩分布</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-accuracy">正确率分析</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-similarity">相似度矩阵</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-ai">AI检测</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-heatmap">代码质量热力图</button></li>
+</ul>
+<div class="tab-content">
+    <div class="tab-pane fade show active" id="tab-dist">
+        <div class="card"><div class="card-body"><div id="chartDist" style="height:400px;"></div></div></div>
+    </div>
+    <div class="tab-pane fade" id="tab-accuracy">
+        <div class="card"><div class="card-body"><div id="chartAcc" style="height:500px;"></div></div></div>
+    </div>
+    <div class="tab-pane fade" id="tab-similarity">
+        <div class="card"><div class="card-body"><div id="chartSim" style="height:500px;"></div></div></div>
+        <div class="card mt-2"><div class="card-body"><pre id="diffView" style="max-height:300px;overflow:auto;font-size:0.8rem;"></pre></div></div>
+    </div>
+    <div class="tab-pane fade" id="tab-ai">
+        <div class="card"><div class="card-body"><div id="aiResults"></div></div></div>
+    </div>
+    <div class="tab-pane fade" id="tab-heatmap">
+        <div class="card"><div class="card-body"><div id="chartHeat" style="height:500px;"></div></div></div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+let examId = {{ exam.id }};
+let simData = null;
+let charts = {};
+let inited = {};
+
+function initTab(tabId) {
+    if (inited[tabId]) {
+        if (charts[tabId]) { charts[tabId].resize(); }
+        return;
+    }
+    inited[tabId] = true;
+
+    if (tabId === 'tab-dist') {
+        let dom = document.getElementById('chartDist');
+        fetch('/api/chart/score_distribution/' + examId).then(r => r.json()).then(d => {
+            if (!d.data) return;
+            charts['tab-dist'] = echarts.init(dom);
+            charts['tab-dist'].setOption({
+                tooltip: { trigger: 'axis' },
+                xAxis: { type: 'category', data: d.data.bins.map(x => x.label), name: '分数段' },
+                yAxis: { type: 'value', name: '人数', minInterval: 1 },
+                series: [{
+                    type: 'bar', data: d.data.bins.map(x => x.count),
+                    itemStyle: {
+                        borderRadius: [6, 6, 0, 0],
+                        color: function(params) {
+                            var isDark = document.body.getAttribute('data-theme') === 'dark';
+                            var palette = isDark
+                                ? ['#818cf8','#6366f1','#4f46e5','#3b82f6','#0ea5e9','#0891b2','#06b6d4','#22d3ee']
+                                : ['#065f46','#047857','#059669','#0d9488','#0f766e','#0891b2','#0ea5e9','#06b6d4'];
+                            var base = palette[params.dataIndex % palette.length];
+                            return new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                { offset: 0, color: base },
+                                { offset: 1, color: base }
+                            ]);
+                        }
+                    },
+                    markLine: {
+                        silent: true,
+                        symbol: 'none',
+                        lineStyle: { color: '#F44336', type: 'dashed', width: 2 },
+                        label: { formatter: '平均分: {c}', position: 'insideEndTop' },
+                        data: [{ yAxis: d.data.average }]
+                    }
+                }]
+            });
+        });
+    } else if (tabId === 'tab-accuracy') {
+        let dom = document.getElementById('chartAcc');
+        fetch('/api/chart/question_accuracy/' + examId).then(r => r.json()).then(d => {
+            charts['tab-accuracy'] = echarts.init(dom);
+            charts['tab-accuracy'].setOption({
+                tooltip: { trigger: 'axis' },
+                xAxis: { type: 'category', data: d.data.map(x => 'Q'+x.order), axisLabel: { rotate: 45 } },
+                yAxis: { type: 'value', name: '正确率(%)', max: 100 },
+                series: [{ type: 'bar', data: d.data.map(x => x.rate),
+                    itemStyle: { color: function(p) { return d.data[p.dataIndex].rate >= 80 ? '#4CAF50' : d.data[p.dataIndex].rate >= 50 ? '#FF9800' : '#F44336'; } }
+                }]
+            });
+        });
+    } else if (tabId === 'tab-similarity') {
+        let dom = document.getElementById('chartSim');
+        if (!dom) { return; }
+        dom.innerHTML = '<div class="text-center text-muted py-5">加载中...</div>';
+        let controller = new AbortController();
+        let timeout = setTimeout(function() { controller.abort(); }, 15000);
+        fetch('/api/chart/similarity_matrix/' + examId, {signal: controller.signal})
+            .then(function(r) {
+                clearTimeout(timeout);
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
+            .then(function(d) {
+                if (!d.matrix || !d.matrix.length) {
+                    dom.innerHTML = '<div class="alert alert-warning m-3">无相似度数据</div>';
+                    return;
+                }
+                simData = d;
+                dom.innerHTML = '';
+                charts['tab-similarity'] = echarts.init(dom);
+                let heatData = [];
+                for (let i = 0; i < d.matrix.length; i++) {
+                    for (let j = 0; j < d.matrix[i].length; j++) {
+                        heatData.push([j, i, parseFloat(d.matrix[i][j].toFixed(4))]);
+                    }
+                }
+                charts['tab-similarity'].setOption({
+                    tooltip: { position: 'top' },
+                    xAxis: { type: 'category', data: d.students, axisLabel: { rotate: 90, fontSize: 9 } },
+                    yAxis: { type: 'category', data: d.students, axisLabel: { fontSize: 9 } },
+                    visualMap: { min: 0, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0,
+                        inRange: { color: ['#ffffff', '#ffeb3b', '#ff9800', '#f44336'] } },
+                    series: [{ type: 'heatmap', data: heatData,
+                        label: { show: false }, emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' } } }]
+                });
+                charts['tab-similarity'].on('click', function(params) {
+                    if (params.data && simData) {
+                        let i = params.data[1], j = params.data[0];
+                        if (i !== j) {
+                            fetch('/api/diff/' + simData.ids[i] + '/' + simData.ids[j]).then(function(r) { return r.json(); }).then(function(dd) {
+                                document.getElementById('diffView').innerHTML = dd.diff.map(function(l) {
+                                    let cls = l.startsWith('+ ') ? 'text-success' : l.startsWith('- ') ? 'text-danger' : 'text-muted';
+                                    return '<span class="' + cls + '">' + l.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</span>';
+                                }).join('\n');
+                            });
+                        }
+                    }
+                });
+            })
+            .catch(function(err) {
+                clearTimeout(timeout);
+                let msg = err.name === 'AbortError' ? '请求超时' : err.message;
+                dom.innerHTML = '<div class="alert alert-danger m-3">加载失败: ' + msg + '</div>';
+            });
+    } else if (tabId === 'tab-ai') {
+        fetch('/api/ai_detection/' + examId).then(r => r.json()).then(d => {
+            let html = '<table class="table table-sm"><thead><tr><th>学生</th><th>AI判定</th><th>命中指标</th><th style="min-width:300px;">详情</th></tr></thead><tbody>';
+            d.forEach(r => {
+                let badge = r.is_ai ? '<span class="badge bg-danger">高度疑似AI</span>' : '<span class="badge bg-success">正常</span>';
+                let capsules = '';
+                if (Array.isArray(r.reasons) && r.reasons.length > 0) {
+                    r.reasons.forEach(function(item) {
+                        let pct = Math.round(item.severity * 100);
+                        let level = item.severity < 0.3 ? 'low' : item.severity < 0.6 ? 'med' : 'high';
+                        let displayVal = typeof item.value === 'number' && item.value < 10 ? item.value.toFixed(2) : item.value;
+                        capsules += '<div class="ai-capsule">' +
+                            '<div class="ai-capsule-fill ' + level + '" style="width:' + pct + '%"></div>' +
+                            '<span class="ai-capsule-text">' + item.label + ' ' + displayVal + '</span>' +
+                            '</div>';
+                    });
+                } else {
+                    capsules = '<span class="text-muted small">无异常</span>';
+                }
+                html += '<tr><td>' + r.student + '</td><td>' + badge + '</td><td>' + r.flags + '</td><td>' + capsules + '</td></tr>';
+            });
+            html += '</tbody></table>';
+            document.getElementById('aiResults').innerHTML = html;
+        });
+    } else if (tabId === 'tab-heatmap') {
+        let dom = document.getElementById('chartHeat');
+        fetch('/api/chart/code_heatmap/' + examId).then(r => r.json()).then(d => {
+            charts['tab-heatmap'] = echarts.init(dom);
+            charts['tab-heatmap'].setOption({
+                tooltip: { position: 'top' },
+                xAxis: { type: 'category', data: d.dimensions },
+                yAxis: { type: 'category', data: d.students },
+                visualMap: { min: 0, max: 100, calculable: true, orient: 'horizontal', left: 'center', bottom: 0,
+                    inRange: { color: ['#f44336', '#ffeb3b', '#4caf50'] } },
+                series: [{ type: 'heatmap', data: (function() { let hd=[]; for (let i=0;i<d.data.length;i++){for(let j=0;j<d.data[i].length;j++){hd.push([j,i,d.data[i][j]]);}} return hd; })(),
+                    label: { show: true, fontSize: 9 },
+                    emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' } } }]
+            });
+        });
+    }
+}
+
+document.querySelectorAll('#analysisTabs button').forEach(btn => {
+    btn.addEventListener('shown.bs.tab', function(e) {
+        initTab(e.target.getAttribute('data-bs-target').replace('#',''));
+    });
+});
+initTab('tab-dist');
+</script>
+{% endblock %}

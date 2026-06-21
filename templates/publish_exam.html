@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}发布考试{% endblock %}
+{% block content %}
+<h2>发布考试: {{ exam.title }}</h2>
+<p>选择参加考试的学生:</p>
+<div class="mb-3">
+    <button type="button" class="btn btn-sm btn-outline-info me-1" onclick="selectSimulated()">仅模拟考生 (20)</button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="deselectAll()">取消全选</button>
+</div>
+<form method="POST" id="publishForm">
+    <div class="row">
+        {% for s in students %}
+        <div class="col-md-3 mb-2">
+            <div class="form-check">
+                <input class="form-check-input student-cb" type="checkbox" name="student_ids" value="{{ s.id }}" id="s{{ s.id }}" data-username="{{ s.username }}">
+                <label class="form-check-label" for="s{{ s.id }}">{{ s.display_name or s.username }}</label>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    <button type="submit" class="btn btn-success mt-3">发布考试（学生即可开始答题）</button>
+    <a href="{{ url_for('edit_exam', exam_id=exam.id) }}" class="btn btn-outline-secondary mt-3">返回编辑</a>
+</form>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+function deselectAll() {
+    document.querySelectorAll('.student-cb').forEach(cb => cb.checked = false);
+}
+function selectSimulated() {
+    document.querySelectorAll('.student-cb').forEach(cb => {
+        cb.checked = cb.dataset.username.startsWith('stu_');
+    });
+}
+</script>
+{% endblock %}

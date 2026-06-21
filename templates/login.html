@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 - PyExam</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #000;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    height: 100vh;
+  }
+
+  canvas#matrix {
+    position: fixed;
+    top: 0; left: 0;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .content {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    padding-bottom: 80px;
+  }
+
+  .title {
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    font-size: clamp(3rem, 6vw, 6rem);
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 0.3em;
+    mix-blend-mode: difference;
+    user-select: none;
+    margin-bottom: 2.5rem;
+  }
+
+  .form-group-custom {
+    width: 280px;
+    margin-bottom: 1rem;
+  }
+
+  .form-group-custom input {
+    width: 100%;
+    padding: 10px 14px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 0;
+    color: #fff;
+    font-size: 14px;
+    font-family: 'Courier New', monospace;
+    outline: none;
+    transition: border-color 0.3s;
+  }
+
+  .form-group-custom input:focus {
+    border-color: #fff;
+    box-shadow: none;
+  }
+
+  .form-group-custom input::placeholder {
+    color: rgba(255,255,255,0.3);
+  }
+
+  .btn-submit {
+    width: 280px;
+    padding: 10px;
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.3);
+    color: #fff;
+    font-size: 20px;
+    cursor: none;
+    transition: all 0.3s;
+    animation: breathe 3s ease-in-out infinite;
+  }
+
+  .btn-submit:hover {
+    border-color: #fff;
+    background: rgba(255,255,255,0.08);
+  }
+
+  @keyframes breathe {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
+  }
+
+  .error-msg {
+    width: 280px;
+    color: #ff4444;
+    font-size: 13px;
+    text-align: center;
+    margin-bottom: 0.5rem;
+    font-family: 'Courier New', monospace;
+  }
+
+  .demo-info {
+    position: fixed;
+    bottom: 30px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    z-index: 2;
+    color: rgba(255,255,255,0.4);
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+    line-height: 1.8;
+    user-select: none;
+  }
+
+  .demo-info p { margin: 0; }
+
+  /* 仅在鼠标悬停表单元素时恢复原生光标 */
+  input:hover, .btn-submit:hover,
+  input:focus, .btn-submit:focus {
+    cursor: text;
+  }
+  .btn-submit:hover, .btn-submit:focus {
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="matrix"></canvas>
+
+<div class="content">
+  <h1 class="title">PyExam</h1>
+
+  {% if error %}
+  <div class="error-msg">{{ error }}</div>
+  {% endif %}
+
+  <form method="POST" action="/login">
+    <div class="form-group-custom">
+      <input type="text" name="username" placeholder="用户名" required autofocus>
+    </div>
+    <div class="form-group-custom">
+      <input type="password" name="password" placeholder="密码" required>
+    </div>
+    <button type="submit" class="btn-submit">&rarr;</button>
+  </form>
+</div>
+
+<div class="demo-info">
+  <p>演示: 教师 guozicheng_teacher / 123456 &nbsp;|&nbsp; 学生 guozicheng_student / 123456</p>
+</div>
+
+<script>
+(function() {
+  const canvas = document.getElementById('matrix');
+  const ctx = canvas.getContext('2d');
+
+  // 离屏 Canvas — 缓存暗色背景字符，避免每帧重绘 5400+ 个字符
+  const offscreen = document.createElement('canvas');
+  const offCtx = offscreen.getContext('2d');
+
+  const CELL_W = 16;
+  const CELL_H = 24;
+  const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+[]{};:<>?/';
+  const SPOTLIGHT_R = 90;
+
+  let cols = 0;
+  let rows = 0;
+  let grid = [];
+  let dpr = 1;
+
+  let spotX = -999;
+  let spotY = -999;
+  let targetX = -999;
+  let targetY = -999;
+  let mouseX = -999;
+  let mouseY = -999;
+  let mouseOnCanvas = false;
+  let overForm = false;
+
+  const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+  function randomChar() {
+    return CHARS[Math.floor(Math.random() * CHARS.length)];
+  }
+
+  function initGrid() {
+    cols = Math.ceil(window.innerWidth / CELL_W);
+    rows = Math.ceil(window.innerHeight / CELL_H);
+    grid = [];
+    for (let r = 0; r < rows; r++) {
+      grid[r] = [];
+      for (let c = 0; c < cols; c++) {
+        grid[r][c] = randomChar();
+      }
+    }
+  }
+
+  // 把全部暗色字符画到离屏 Canvas（仅 resize 或定时刷新时调用）
+  function drawOffscreen() {
+    offCtx.clearRect(0, 0, offscreen.width, offscreen.height);
+    offCtx.fillStyle = '#1a1a1a';
+    offCtx.font = '13px monospace';
+    offCtx.textAlign = 'left';
+    offCtx.textBaseline = 'top';
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        offCtx.fillText(grid[r][c], c * CELL_W, r * CELL_H);
+      }
+    }
+  }
+
+  // 定时随机替换 5% 字符，只更新离屏 Canvas 对应格子
+  function tickChars() {
+    const total = rows * cols;
+    const count = Math.floor(total * (isTouchDevice ? 0.02 : 0.05));
+    for (let i = 0; i < count; i++) {
+      const idx = Math.floor(Math.random() * total);
+      const r = Math.floor(idx / cols);
+      const c = idx % cols;
+      grid[r][c] = randomChar();
+      // 局部擦除 + 重绘这一个格子
+      const x = c * CELL_W, y = r * CELL_H;
+      offCtx.fillStyle = '#000000';
+      offCtx.fillRect(x, y, CELL_W, CELL_H);
+      offCtx.fillStyle = '#1a1a1a';
+      offCtx.fillText(grid[r][c], x, y);
+    }
+  }
+
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    offscreen.width = window.innerWidth;
+    offscreen.height = window.innerHeight;
+    offCtx.setTransform(1, 0, 0, 1, 0, 0);
+
+    initGrid();
+    drawOffscreen();
+  }
+
+  function isOverFormElement(mx, my) {
+    const inputs = document.querySelectorAll('input');
+    const btn = document.querySelector('.btn-submit');
+    const elems = [...inputs, btn];
+    for (const el of elems) {
+      if (!el) continue;
+      const rect = el.getBoundingClientRect();
+      if (mx >= rect.left && mx <= rect.right && my >= rect.top && my <= rect.bottom) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+    // 1. 贴入离屏背景（暗色字符矩阵，瞬间完成）
+    ctx.drawImage(offscreen, 0, 0);
+
+    // 2. 只重绘探照灯圆圈内的字符（白色）
+    if (!overForm && !isTouchDevice && spotX > -500 && spotY > -500) {
+      ctx.font = '13px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      const r2 = SPOTLIGHT_R * SPOTLIGHT_R;
+      // 只遍历圆圈覆盖的行列范围，不是全部格子
+      const c0 = Math.max(0, Math.floor((spotX - SPOTLIGHT_R) / CELL_W));
+      const c1 = Math.min(cols - 1, Math.ceil((spotX + SPOTLIGHT_R) / CELL_W));
+      const r0 = Math.max(0, Math.floor((spotY - SPOTLIGHT_R) / CELL_H));
+      const r1 = Math.min(rows - 1, Math.ceil((spotY + SPOTLIGHT_R) / CELL_H));
+      for (let r = r0; r <= r1; r++) {
+        for (let c = c0; c <= c1; c++) {
+          const x = c * CELL_W;
+          const y = r * CELL_H;
+          const dx = x + CELL_W / 2 - spotX;
+          const dy = y + CELL_H / 2 - spotY;
+          if (dx * dx + dy * dy <= r2) {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(grid[r][c], x, y);
+          }
+        }
+      }
+
+      // 3. 圆圈边框
+      ctx.beginPath();
+      ctx.arc(spotX, spotY, SPOTLIGHT_R, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = 1;
+      ctx.shadowBlur = 20;
+      ctx.shadowColor = 'rgba(255,255,255,0.3)';
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  function frame() {
+    if (!isTouchDevice) {
+      overForm = isOverFormElement(mouseX, mouseY);
+      document.body.style.cursor = overForm ? '' : 'none';
+    }
+
+    if (!overForm && !isTouchDevice && mouseOnCanvas) {
+      spotX = targetX;
+      spotY = targetY;
+    } else if (overForm || isTouchDevice) {
+      spotX = -999;
+      spotY = -999;
+    }
+
+    draw();
+  }
+
+  window.addEventListener('resize', resize);
+
+  document.addEventListener('mousemove', function(e) {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+    targetX = e.clientX;
+    targetY = e.clientY;
+  });
+
+  document.addEventListener('mouseenter', function() { mouseOnCanvas = true; });
+  document.addEventListener('mouseleave', function() { mouseOnCanvas = false; });
+
+  // 初始化
+  resize();
+  spotX = window.innerWidth / 2;
+  spotY = window.innerHeight / 2;
+  targetX = spotX;
+  targetY = spotY;
+  mouseX = spotX;
+  mouseY = spotY;
+  mouseOnCanvas = true;
+
+  // 每 100ms 更新 5% 字符（独立于渲染帧率）
+  setInterval(tickChars, 100);
+  requestAnimationFrame(frame);
+})();
+</script>
+
+</body>
+</html>

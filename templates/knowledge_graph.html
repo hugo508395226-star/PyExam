@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% block title %}知识图谱{% endblock %}
+{% block content %}
+<h2>个人知识图谱
+    <a href="{{ url_for('student_dashboard') }}" class="btn btn-outline-secondary btn-sm ms-3"><i class="bi bi-arrow-left"></i> 返回仪表盘</a>
+</h2>
+<div class="row">
+    <div class="col-md-9">
+        <div class="card"><div class="card-body"><div id="graphChart" style="height:600px;"></div></div></div>
+    </div>
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-header">图例</div>
+            <div class="card-body">
+                <p><span class="badge" style="background:#4CAF50;display:inline-block;width:16px;height:16px;">&nbsp;</span> 掌握良好 (>=80%)</p>
+                <p><span class="badge" style="background:#FF9800;display:inline-block;width:16px;height:16px;">&nbsp;</span> 需要加强 (40-80%)</p>
+                <p><span class="badge" style="background:#F44336;display:inline-block;width:16px;height:16px;">&nbsp;</span> 薄弱 (<40%)</p>
+                <hr>
+                <div id="kpInfo" class="small">
+                    <p class="text-muted">点击节点查看详情</p>
+                </div>
+            </div>
+        </div>
+        <div class="card mt-2">
+            <div class="card-header">自适应推荐</div>
+            <div class="card-body" id="recommendations">
+                <p class="text-muted small">薄弱知识点相关题目将优先推荐</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="kpQuestionsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg"><div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">关联题目</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body" id="kpQuestionsBody"></div>
+    </div></div>
+</div>
+
+<div class="modal fade" id="practiceModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title" id="practiceTitle">练习</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body" id="practiceBody"></div>
+    </div></div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+let studentId = {{ student_id }};
+let chart = echarts.init(document.getElementById('graphChart'));
+
+fetch('/api/knowledge_graph/' + studentId).then(r => r.json()).then(data => {
+    let nodes = data.nodes.map(n => ({
+        name: n.name,
+        symbolSize: 30 + n.rate * 0.3,
+        itemStyle: n.itemStyle,
+        category: n.category,
+        description: n.description,
+        rate: n.rate,
+        id: n.id,
+        label: { show: true, fontSize: 11 }
+    }));
+    let categories = [
+        {name: 'basic', itemStyle: {color: '#4CAF50'}},
+        {name: 'intermediate', itemStyle: {color: '#FF9800'}},
+        {name: 'advanced', itemStyle: {color: '#F44336'}}
+    ];
+
+    chart.setOption({
+        tooltip: {
+            formatter: function(p) {
+                if (p.dataType === 'node') {
+                    return '<strong>' + p.name + '</strong><br/>正确率: ' + (p.data.rate || 0) + '%<br/>' + (p.data.description || '');
+                }
+                return '';
+            }
+        },
+        legend: { data: categories.map(c => c.name) },
+        series: [{
+            type: 'graph', layout: 'force', roam: true, draggable: true,
+            force: { repulsion: 300, edgeLength: [100, 200] },
+            data: nodes,
+            links: data.links.map(l => ({source: l.source, target: l.target})),
+            categories: categories,
+            label: { show: true, position: 'right', fontSize: 11 }
+        }]
+    });
+
+    chart.on('click', function(params) {
+        if (params.dataType === 'node') {
+            let kpId = params.data.id;
+            fetch('/api/knowledge_graph/' + studentId + '/questions/' + kpId).then(r => r.json()).then(qs => {
+                let typeNames = {single_choice:'单选题', multi_choice:'多选题', true_false:'判断题', fill_blank:'填空题', programming:'编程题'};
+                let html = '<table class="table table-sm"><thead><tr><th>题目</th><th>类型</th><th>难度</th><th>表现</th><th>练习</th></tr></thead><tbody>';
+                qs.forEach(q => {
+                    let status = q.last_correct === null ? '<span class="badge bg-secondary">未做</span>' :
+                                 q.last_correct ? '<span class="badge bg-success">正确</span>' :
+                                 '<span class="badge bg-danger">错误</span>';
+                    html += '<tr><td>' + q.title.substring(0, 60) + '</td><td>' + (typeNames[q.type] || q.type) + '</td><td>' + '★'.repeat(q.difficulty) + '</td><td>' + status + '</td>';
+                    html += '<td><span class="badge bg-primary" style="cursor:pointer" onclick="startPractice(' + q.id + ')">练习</span></td></tr>';
+                });
+                html += '</tbody></table>';
+                document.getElementById('kpQuestionsBody').innerHTML = html;
+                new bootstrap.Modal(document.getElementById('kpQuestionsModal')).show();
+            });
+            document.getElementById('kpInfo').innerHTML = '<strong>' + params.data.name + '</strong><br/>正确率: ' + (params.data.rate || 0) + '%<br/>' + (params.data.description || '');
+        }
+    });
+
+    let weakKps = nodes.filter(n => n.rate < 80).sort((a, b) => a.rate - b.rate);
+    let recHtml = '<ul class="list-unstyled small">';
+    weakKps.slice(0, 5).forEach(n => {
+        let color = n.rate < 40 ? 'text-danger' : 'text-warning';
+        recHtml += '<li class="' + color + '">' + n.name + ' (' + n.rate + '%)</li>';
+    });
+    recHtml += '</ul>';
+    document.getElementById('recommendations').innerHTML = recHtml || '<p class="text-muted small">暂无推荐</p>';
+});
+
+let currentQid = null;
+
+function startPractice(qid) {
+    currentQid = qid;
+    document.getElementById('practiceBody').innerHTML = '<p class="text-muted text-center">加载中...</p>';
+    document.getElementById('practiceTitle').textContent = '练习';
+    new bootstrap.Modal(document.getElementById('practiceModal')).show();
+
+    fetch('/api/practice/question/' + qid).then(r => {
+        if (!r.ok) throw new Error('请求失败 ' + r.status);
+        return r.json();
+    }).then(q => {
+        if (!q.ok) { alert(q.msg); return; }
+        let typeNames = {single_choice:'单选题', multi_choice:'多选题', true_false:'判断题', fill_blank:'填空题', programming:'编程题'};
+        document.getElementById('practiceTitle').textContent = '练习 — ' + (typeNames[q.type] || q.type);
+        let formHtml = '<form id="practiceForm" onsubmit="checkPractice(event, ' + qid + ')">';
+        formHtml += '<p class="fw-bold mb-2">' + q.title + '</p>';
+
+        if (q.type === 'single_choice' || q.type === 'multi_choice') {
+            let inputType = q.type === 'single_choice' ? 'radio' : 'checkbox';
+            q.options.forEach((opt, i) => {
+                let letter = String.fromCharCode(65 + i);
+                formHtml += '<div class="form-check"><input class="form-check-input" type="' + inputType + '" name="answer" value="' + letter + '" id="popt' + i + '"><label class="form-check-label" for="popt' + i + '">' + opt + '</label></div>';
+            });
+        } else if (q.type === 'true_false') {
+            formHtml += '<div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="answer" value="T" id="poptT"><label class="form-check-label" for="poptT">正确</label></div>';
+            formHtml += '<div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="answer" value="F" id="poptF"><label class="form-check-label" for="poptF">错误</label></div>';
+        } else if (q.type === 'fill_blank') {
+            formHtml += '<input type="text" class="form-control form-control-sm" name="answer" placeholder="请输入答案">';
+        } else if (q.type === 'programming') {
+            formHtml += '<textarea class="form-control form-control-sm" name="answer" rows="8" placeholder="请输入代码">' + (q.code_template || '') + '</textarea>';
+        }
+
+        formHtml += '<div class="mt-2"><button type="submit" class="btn btn-sm btn-primary">提交答案</button></div>';
+        formHtml += '</form><div id="practiceResult" class="mt-2"></div>';
+        document.getElementById('practiceBody').innerHTML = formHtml;
+    }).catch(function(err) {
+        document.getElementById('practiceBody').innerHTML = '<div class="alert alert-danger small">加载题目失败: ' + err.message + '</div>';
+    });
+}
+
+function checkPractice(e, qid) {
+    e.preventDefault();
+    let form = document.getElementById('practiceForm');
+    let data = new FormData(form);
+    let answer;
+    let allAnswers = data.getAll('answer');
+    if (allAnswers.length > 1) {
+        answer = allAnswers.join(',');
+    } else {
+        answer = data.get('answer') || '';
+    }
+
+    document.getElementById('practiceResult').innerHTML = '<p class="text-muted small">判题中...</p>';
+
+    fetch('/api/practice/check/' + qid, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({answer: answer})
+    }).then(r => {
+        if (!r.ok) throw new Error('请求失败 ' + r.status);
+        return r.json();
+    }).then(res => {
+        if (!res.ok) { alert(res.msg); return; }
+        let resultDiv = document.getElementById('practiceResult');
+        let correctAnswer = res.correct_answer || '';
+        let safeAnswer = answer.replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        if (res.is_correct) {
+            resultDiv.innerHTML = '<div class="alert alert-success py-1 small">回答正确！</div>';
+        } else {
+            resultDiv.innerHTML = '<div class="alert alert-danger py-1 small">回答错误！正确答案：<strong>' + correctAnswer + '</strong></div>';
+        }
+        resultDiv.innerHTML += '<button class="btn btn-sm btn-outline-warning mt-1" onclick="addToWrongBook(' + qid + ',\'' + safeAnswer + '\',' + (res.is_correct ? 1 : 0) + ')">加入错题本</button>';
+    }).catch(function(err) {
+        document.getElementById('practiceResult').innerHTML = '<div class="alert alert-danger small">检查答案失败: ' + err.message + '</div>';
+    });
+}
+
+function addToWrongBook(qid, answer, isCorrect) {
+    fetch('/api/wrong_book/add', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({question_id: qid, student_answer: answer, is_correct: isCorrect})
+    }).then(r => r.json()).then(res => {
+        alert(res.msg || (res.ok ? '已加入错题本' : '操作失败'));
+    });
+}
+</script>
+{% endblock %}

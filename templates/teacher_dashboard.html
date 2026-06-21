@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}教师仪表盘{% endblock %}
+{% block content %}
+<h2>教师仪表盘</h2>
+<div class="row mt-3">
+    <div class="col-md-3">
+        <div class="card text-bg-primary">
+            <div class="card-body"><h2 class="tabular-nums mb-0">{{ exams|length }}</h2><p class="mb-0 mt-1">我的考试</p></div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-bg-success">
+            <div class="card-body">
+                <h2 class="tabular-nums mb-0">{{ exams|selectattr('status','equalto','completed')|list|length }}</h2>
+                <p class="mb-0 mt-1">已完成</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-bg-warning">
+            <div class="card-body">
+                <h2 class="tabular-nums mb-0">{{ exams|selectattr('status','equalto','in_progress')|list|length }}</h2>
+                <p class="mb-0 mt-1">进行中</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-bg-secondary">
+            <div class="card-body">
+                <h2 class="tabular-nums mb-0">{{ exams|selectattr('status','equalto','draft')|list|length }}</h2>
+                <p class="mb-0 mt-1">草稿</p>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="row mt-3">
+    <div class="col-12">
+        <a href="{{ url_for('create_exam') }}" class="btn btn-primary"><i class="bi bi-plus-circle"></i> 创建考试</a>
+        <a href="{{ url_for('teacher_exams') }}" class="btn btn-outline-secondary">管理考试</a>
+        <a href="{{ url_for('teacher_questions') }}" class="btn btn-outline-secondary">题库管理</a>
+    </div>
+</div>
+{% if exams %}
+<h5 class="mt-4">最近考试</h5>
+<table class="table table-hover">
+    <thead><tr><th>标题</th><th>状态</th><th>时长(分)</th><th>创建时间</th><th>操作</th></tr></thead>
+    <tbody>
+    {% for e in exams %}
+    <tr>
+        <td>{{ e.title }}</td>
+        <td>
+            {% if e.status == 'draft' %}<span class="badge bg-secondary">草稿</span>
+            {% elif e.status == 'published' %}<span class="badge bg-info">已发布</span>
+            {% elif e.status == 'in_progress' %}<span class="badge bg-warning">进行中</span>
+            {% elif e.status == 'grading' %}<span class="badge bg-primary">判分中</span>
+            {% elif e.status == 'completed' %}<span class="badge bg-success">已完成</span>
+            {% endif %}
+        </td>
+        <td>{{ e.duration_minutes }}</td>
+        <td>{{ e.created_at[:16] if e.created_at }}</td>
+        <td>
+            {% if e.status == 'draft' %}
+            <a href="{{ url_for('edit_exam', exam_id=e.id) }}" class="btn btn-sm btn-outline-secondary">编辑</a>
+            {% endif %}
+            <a href="{{ url_for('teacher_exam_results', exam_id=e.id) }}" class="btn btn-sm btn-outline-primary">查看</a>
+            {% if e.status in ('completed','grading') %}
+            <a href="{{ url_for('exam_analysis', exam_id=e.id) }}" class="btn btn-sm btn-outline-info">分析</a>
+            {% endif %}
+            <form method="POST" action="{{ url_for('delete_exam', exam_id=e.id) }}" style="display:inline" onsubmit="return confirm('确认删除此考试?该操作不可恢复')">
+                <button class="btn btn-sm btn-outline-danger">删除</button>
+            </form>
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+{% endblock %}

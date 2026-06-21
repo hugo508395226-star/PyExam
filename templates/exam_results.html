@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}考试成绩 - {{ exam.title }}{% endblock %}
+{% block content %}
+<h2>{{ exam.title }} - 成绩</h2>
+<p>状态: <span class="badge {% if exam.status=='completed' %}bg-success{% elif exam.status=='grading' %}bg-primary{% elif exam.status=='in_progress' %}bg-warning{% else %}bg-secondary{% endif %}">{{ {'draft':'草稿','published':'已发布','in_progress':'进行中','grading':'判分中','completed':'已完成'}.get(exam.status, exam.status) }}</span>
+{% if exam.status == 'grading' %}<small class="text-muted ms-2">判分进行中，页面将在5秒后自动刷新...</small>{% endif %}</p>
+<div class="mb-3">
+    {% if exam.status == 'in_progress' %}
+    <form method="POST" action="{{ url_for('force_end_exam', exam_id=exam.id) }}" style="display:inline" onsubmit="return confirm('强制结束?')">
+        <button class="btn btn-danger btn-sm">强制结束并判分</button>
+    </form>
+    {% endif %}
+    <a href="{{ url_for('export_excel', exam_id=exam.id) }}" class="btn btn-success btn-sm">导出Excel</a>
+    <a href="{{ url_for('exam_analysis', exam_id=exam.id) }}" class="btn btn-info btn-sm">成绩分析</a>
+    <a href="{{ url_for('code_review', exam_id=exam.id) }}" class="btn btn-warning btn-sm">代码审查</a>
+</div>
+<div class="table-responsive">
+    <table class="table table-hover table-sm">
+        <thead>
+            <tr>
+                <th>学号</th><th>姓名</th><th>状态</th><th>总分</th>
+                {% for eq in eqs %}
+                <th title="{{ eq.title[:30] }}">Q{{ eq.order_num }}<br><small>({{ eq.points }}分)</small></th>
+                {% endfor %}
+                <th>切屏次数</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for se in ses %}
+        <tr>
+            <td>{{ se.username }}</td>
+            <td>{{ se.display_name or '' }}</td>
+            <td>
+                {% if se.status == 'graded' %}<span class="badge bg-success">已出分</span>
+                {% elif se.status == 'submitted' %}<span class="badge bg-info">已提交</span>
+                {% elif se.status == 'in_progress' %}<span class="badge bg-warning">答题中</span>
+                {% elif se.status == 'timeout' %}<span class="badge bg-danger">超时</span>
+                {% elif se.status == 'pending' %}<span class="badge bg-secondary">待参加</span>
+                {% else %}<span class="badge bg-secondary">{{ se.status }}</span>
+                {% endif %}
+            </td>
+            <td class="tabular-nums"><strong>{{ se.score|round(1) if se.score is not none else '-' }}</strong></td>
+            {% for eq in eqs %}
+            {% set ans = score_map.get(se.id, {}).get(eq.question_id) %}
+            <td class="tabular-nums" style="font-size:0.8rem;">
+                {% if ans %}{{ ans.score|round(1) }}/{{ eq.points }}{% else %}-{% endif %}
+            </td>
+            {% endfor %}
+            <td class="tabular-nums">{{ se.tab_switches or 0 }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% if exam.status == 'grading' %}
+<script>setTimeout(function(){ location.reload(); }, 5000);</script>
+{% endif %}
+{% endblock %}

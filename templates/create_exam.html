@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}创建考试{% endblock %}
+{% block content %}
+<h2>创建考试</h2>
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <form method="POST" id="createExamForm">
+                    <div class="mb-3">
+                        <label class="form-label">考试标题 *</label>
+                        <input type="text" name="title" class="form-control" value="{{ default_title }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">描述</label>
+                        <textarea name="description" class="form-control" rows="2"></textarea>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">考试时长(分钟)</label>
+                            <input type="number" name="duration" class="form-control" value="60" min="1">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">演示加速倍率</label>
+                            <input type="number" name="speed_multiplier" class="form-control" value="1.0" min="1" max="10" step="0.5">
+                            <small class="text-muted">演示模式下倒计时加速，正式考试设为1</small>
+                        </div>
+                    </div>
+                    <hr>
+                    <h5>自动组卷 <span class="badge bg-info">推荐</span></h5>
+                    <div class="row">
+                        <div class="col-4 mb-2"><label>单选题数量</label><input type="number" name="sc_count" class="form-control" value="1" min="0"></div>
+                        <div class="col-4 mb-2"><label>多选题数量</label><input type="number" name="mc_count" class="form-control" value="1" min="0"></div>
+                        <div class="col-4 mb-2"><label>判断题数量</label><input type="number" name="tf_count" class="form-control" value="1" min="0"></div>
+                        <div class="col-4 mb-2"><label>填空题数量</label><input type="number" name="fb_count" class="form-control" value="1" min="0"></div>
+                        <div class="col-4 mb-2"><label>编程题数量</label><input type="number" name="pr_count" class="form-control" value="1" min="0"></div>
+                    </div>
+                    <input type="hidden" name="auto_gen" id="autoGenFlag" value="1">
+                    <input type="hidden" name="question_ids" id="selected_ids">
+                    <button type="submit" class="btn btn-primary btn-lg mt-3">自动组卷并创建</button>
+                </form>
+                <hr>
+                <h5>手动选题</h5>
+                <button type="button" class="btn btn-outline-primary" onclick="submitManual()">手动创建（已选 <span id="selCount">0</span> 题）</button>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">题库 (点击题目选中)</div>
+            <div class="card-body" style="max-height:600px;overflow-y:auto;">
+                <input type="text" id="searchBox" class="form-control mb-2" placeholder="搜索题目...">
+                <div id="questionList">
+                {% for q in questions %}
+                <div class="question-item border rounded p-2 mb-1" data-id="{{ q.id }}" data-type="{{ q.type }}" data-title="{{ q.title }}" style="cursor:pointer;">
+                    <span class="badge {% if q.type=='single_choice' %}bg-primary{% elif q.type=='multi_choice' %}bg-info{% elif q.type=='true_false' %}bg-success{% elif q.type=='fill_blank' %}bg-warning{% elif q.type=='programming' %}bg-danger{% endif %} me-1" style="font-size:0.65rem;">{{ {'single_choice':'单选','multi_choice':'多选','true_false':'判断','fill_blank':'填空','programming':'编程'}[q.type] }}</span>
+                    {{ q.title[:50] }}
+                    <small class="text-muted">{{ '★'*q.difficulty }}</small>
+                </div>
+                {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+let selected = new Set();
+document.querySelectorAll('.question-item').forEach(el => {
+    el.addEventListener('click', function() {
+        let id = this.dataset.id;
+        if (selected.has(id)) { selected.delete(id); this.style.background = ''; }
+        else { selected.add(id); this.style.background = '#d4edda'; }
+        document.getElementById('selCount').textContent = selected.size;
+    });
+});
+function submitManual() {
+    if (selected.size === 0) {
+        alert('请至少选择一道题目');
+        return;
+    }
+    document.getElementById('selected_ids').value = Array.from(selected).join(',');
+    document.getElementById('autoGenFlag').removeAttribute('name');
+    document.getElementById('createExamForm').submit();
+}
+document.getElementById('searchBox').addEventListener('input', function() {
+    let term = this.value.toLowerCase();
+    document.querySelectorAll('.question-item').forEach(el => {
+        el.style.display = el.dataset.title.toLowerCase().includes(term) ? '' : 'none';
+    });
+});
+</script>
+{% endblock %}

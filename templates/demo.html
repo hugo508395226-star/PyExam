@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}演示模式{% endblock %}
+{% block content %}
+<h2>演示模式 - 一键模拟考试</h2>
+
+<div class="row mt-3">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">演示考试</div>
+            <div class="card-body" id="examPanel">
+                {% if demo_exam %}
+                <div class="alert alert-success">
+                    <strong>演示考试已就绪</strong><br>
+                    标题: {{ demo_exam.title }}<br>
+                    状态: <span class="badge bg-{{ 'success' if demo_exam.status=='completed' else 'warning' }}">{{ demo_exam.status }}</span><br>
+                    总分: 100 分 (10单选×3 + 5多选×4 + 10判断×2 + 5填空×2 + 2编程×10)
+                </div>
+                <input type="hidden" id="demoExamId" value="{{ demo_exam.id }}">
+                {% else %}
+                <div class="alert alert-info">
+                    <p>尚未创建演示考试。点击下方按钮创建固定100分标准试卷。</p>
+                    <button class="btn btn-primary" onclick="createDemoExam()">创建演示考试</button>
+                </div>
+                <input type="hidden" id="demoExamId" value="">
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">预设班级方案</div>
+            <div class="card-body">
+                <div class="list-group" id="scenarioButtons">
+                    <button class="list-group-item list-group-item-action" onclick="runSim(1)" id="btn-s1">
+                        <strong>方案1: 正常班级</strong> - 正态分布基线 (学霸2+稳定6+中等8+偏科2+抄袭对1)
+                    </button>
+                    <button class="list-group-item list-group-item-action" onclick="runSim(2)" id="btn-s2">
+                        <strong>方案2: 两极分化班</strong> - 双峰分布，中间断层 (学霸8+低分段8+中等4)
+                    </button>
+                    <button class="list-group-item list-group-item-action" onclick="runSim(3)" id="btn-s3">
+                        <strong>方案3: 抄袭泛滥班</strong> - 相似度矩阵大面积红色 (抄袭对4对8人)
+                    </button>
+                    <button class="list-group-item list-group-item-action" onclick="runSim(4)" id="btn-s4">
+                        <strong>方案4: AI风格班</strong> - 10人AI代码+10人纯手写，雷达图对比鲜明
+                    </button>
+                    <button class="list-group-item list-group-item-action" onclick="runSim(5)" id="btn-s5">
+                        <strong>方案5: 高分低能班</strong> - 客观题90%+但编程题全挂，知识图谱断层
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="simStatus" class="mt-3"></div>
+
+<div class="card mt-3">
+    <div class="card-header">演示操作指南</div>
+    <div class="card-body">
+        <ol>
+            <li>首次使用点击"创建演示考试"，自动生成固定100分标准试卷并发布给20名模拟学生</li>
+            <li>点击任意方案按钮，系统自动生成20名学生的模拟答卷并即时完成判分</li>
+            <li>同一方案可多次点击，每次生成结果略有不同，应对反复演示需求</li>
+            <li>登录学生账号体验答题，或导航栏一键切换教师端查看分析图表</li>
+        </ol>
+    </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+let demoExamId = document.getElementById('demoExamId').value || null;
+
+function createDemoExam() {
+    let panel = document.getElementById('examPanel');
+    panel.innerHTML = '<div class="alert alert-info">正在创建演示考试...</div>';
+    fetch('/demo/create_exam', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({})
+    }).then(r => r.json()).then(d => {
+        if (d.ok) {
+            demoExamId = d.exam_id;
+            document.getElementById('demoExamId').value = d.exam_id;
+            panel.innerHTML = '<div class="alert alert-success"><strong>演示考试已就绪</strong><br>标题: 【演示】标准100分试卷<br>总分: 100 分 (10单选×3 + 5多选×4 + 10判断×2 + 5填空×2 + 2编程×10)<br><small>考试ID: ' + d.exam_id + ' | 状态: ' + d.status + '</small></div>';
+        } else {
+            panel.innerHTML = '<div class="alert alert-danger">创建失败: ' + (d.error || 'Unknown') + '</div>';
+        }
+    });
+}
+
+function runSim(scenario) {
+    if (!demoExamId) {
+        alert('请先创建演示考试');
+        return;
+    }
+    let status = document.getElementById('simStatus');
+    let btn = document.getElementById('btn-s' + scenario);
+    btn.disabled = true;
+    btn.querySelector('strong').textContent += ' (模拟中...)';
+    status.innerHTML = '<div class="alert alert-info">正在生成模拟数据...</div>';
+
+    fetch('/demo/simulate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({scenario: scenario, exam_id: parseInt(demoExamId)})
+    }).then(r => r.json()).then(d => {
+        btn.disabled = false;
+        // Restore button text
+        let names = {1:'正常班级', 2:'两极分化班', 3:'抄袭泛滥班', 4:'AI风格班', 5:'高分低能班'};
+        btn.querySelector('strong').textContent = '方案' + scenario + ': ' + names[scenario];
+
+        if (d.ok) {
+            let html = '<div class="alert alert-success"><strong>模拟完成</strong><br>';
+            html += d.student_count + ' 名学生答卷已生成，判分完成。<br>';
+            html += '<a href="/teacher/exams/' + d.exam_id + '/results" class="btn btn-sm btn-primary me-2 mt-2">查看成绩</a>';
+            html += '<a href="/teacher/exams/' + d.exam_id + '/analysis" class="btn btn-sm btn-info me-2 mt-2">成绩分析</a>';
+            html += '<a href="/teacher/exams/' + d.exam_id + '/code_review" class="btn btn-sm btn-warning mt-2">代码审查</a>';
+            html += '</div>';
+            status.innerHTML = html;
+        } else {
+            status.innerHTML = '<div class="alert alert-danger">模拟失败: ' + (d.error || 'Unknown') + '</div>';
+        }
+    });
+}
+
+</script>
+{% endblock %}

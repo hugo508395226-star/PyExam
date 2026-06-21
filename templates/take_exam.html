@@ -1,0 +1,382 @@
+{% extends "base.html" %}
+{% block title %}{{ exam.title }}{% endblock %}
+{% block extra_head %}
+<style>
+#timerDisplay { font-size: 2rem; font-weight: bold; font-family: monospace; }
+.timer-warning { color: #FF9800 !important; }
+.timer-danger { color: #F44336 !important; animation: blink 1s infinite; }
+@keyframes blink { 50% { opacity: 0.5; } }
+.question-nav-btn { width: 40px; height: 40px; margin: 3px; font-size: 0.8rem; }
+.question-nav-btn.answered { background-color: #4CAF50; color: white; }
+.question-nav-btn.current { border: 3px solid #2196F3; }
+.question-panel { display: none; }
+.question-panel.active { display: block; }
+.option-label { cursor: pointer; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; display: block; margin: 4px 0; }
+.option-label:hover { background: #f0f0f0; }
+.option-label.selected { background: #e3f2fd; border-color: #2196F3; }
+.option-label.correct-answer { background: #c8e6c9; border-color: #4CAF50; }
+.option-label input[type="radio"],
+.option-label input[type="checkbox"] {
+    width: 18px; height: 18px;
+    vertical-align: middle; cursor: pointer;
+    flex-shrink: 0; margin-right: 8px;
+}
+.option-label input[type="checkbox"] {
+    -webkit-appearance: none; appearance: none;
+    border: 2px solid #6c757d; border-radius: 50%;
+    position: relative;
+}
+.option-label input[type="checkbox"]:checked {
+    background-color: #0d6efd; border-color: #0d6efd;
+}
+.option-label input[type="checkbox"]:checked::after {
+    content: ''; position: absolute;
+    top: 2px; left: 5px;
+    width: 5px; height: 9px;
+    border: solid white; border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+</style>
+{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col-md-9">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4>{{ exam.title }}</h4>
+            <div class="d-flex align-items-center gap-2">
+                <button class="btn btn-outline-secondary btn-sm" id="prevBtn" onclick="navigate(-1)">上一题</button>
+                <button class="btn btn-outline-secondary btn-sm" id="nextBtn" onclick="navigate(1)">下一题</button>
+                <div>
+                    倒计时: <span id="timerDisplay" class="tabular-nums" data-remaining="{{ remaining }}">{{ '%02d:%02d' % (remaining//60, remaining%60) }}</span>
+                </div>
+            </div>
+        </div>
+        <input type="hidden" id="speedMultiplier" value="{{ speed }}">
+        <input type="hidden" id="studentExamId" value="{{ se.id }}">
+        <input type="hidden" id="examId" value="{{ exam.id }}">
+
+        <div id="questionPanels">
+            {% for eq in eqs %}
+            <div class="question-panel {% if loop.first %}active{% endif %}" data-qid="{{ eq.question_id }}" data-idx="{{ loop.index0 }}">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between">
+                        <span>第 {{ eq.order_num }} 题
+                            <span class="badge bg-{% if eq.type=='single_choice' %}primary{% elif eq.type=='multi_choice' %}info{% elif eq.type=='true_false' %}success{% elif eq.type=='fill_blank' %}warning{% else %}danger{% endif %}">
+                                {{ {'single_choice':'单选题','multi_choice':'多选题','true_false':'判断题','fill_blank':'填空题','programming':'编程题'}[eq.type] }}
+                            </span>
+                            <small class="text-muted">({{ eq.points }}分)</small>
+                        </span>
+                    </div>
+                    <div class="card-body">
+                        <p><strong>{{ eq.q_title }}</strong></p>
+
+                        {% if eq.type in ('single_choice', 'multi_choice') %}
+                        <div class="options-list">
+                            {% for opt in eq.options_parsed %}
+                            {% if opt and opt|length >= 2 %}
+                            {% set letter = opt[0] %}
+                            {% set text = opt[3:] if opt|length > 2 and opt[1:3] == '. ' else opt[2:] if opt|length > 1 and opt[1] in ('.', ' ') else opt %}
+                            <label class="option-label" data-value="{{ letter }}" data-qid="{{ eq.question_id }}">
+                                <input type="{% if eq.type=='multi_choice' %}checkbox{% else %}radio{% endif %}"
+                                       name="q_{{ eq.question_id }}" value="{{ letter }}">
+                                <strong>{{ letter }}.</strong> {{ text }}
+                            </label>
+                            {% endif %}
+                            {% endfor %}
+                        </div>
+                        {% elif eq.type == 'true_false' %}
+                        <div class="options-list">
+                            <label class="option-label" data-value="T" data-qid="{{ eq.question_id }}">
+                                <input type="radio" name="q_{{ eq.question_id }}" value="T"> 正确 (True)
+                            </label>
+                            <label class="option-label" data-value="F" data-qid="{{ eq.question_id }}">
+                                <input type="radio" name="q_{{ eq.question_id }}" value="F"> 错误 (False)
+                            </label>
+                        </div>
+                        {% elif eq.type == 'fill_blank' %}
+                        <input type="text" class="form-control fill-blank-input" data-qid="{{ eq.question_id }}"
+                               placeholder="请输入答案" value="{{ drafts.get(eq.question_id, '') }}">
+                        {% elif eq.type == 'programming' %}
+                        <div class="row">
+                            <div class="col-md-8">
+                                <textarea class="form-control code-input" data-qid="{{ eq.question_id }}"
+                                          rows="12" style="font-family:monospace;"
+                                          placeholder="在此编写Python代码...">{{ drafts.get(eq.question_id, '') }}</textarea>
+                            </div>
+                            <div class="col-md-4">
+                                <button class="btn btn-outline-secondary btn-sm mb-2 run-code-btn" data-qid="{{ eq.question_id }}">运行测试</button>
+                                <pre class="border rounded p-2 code-output" data-qid="{{ eq.question_id }}" style="max-height:200px;overflow:auto;font-size:0.8rem;">点击"运行测试"查看输出</pre>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="d-flex justify-content-end mt-3">
+            <button class="btn btn-danger" id="submitBtn" onclick="submitExam()" style="display:none;">提交试卷</button>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-header">答题卡</div>
+            <div class="card-body">
+                <div id="questionNav">
+                    {% for eq in eqs %}
+                    <button class="btn btn-outline-secondary question-nav-btn {% if drafts.get(eq.question_id) %}answered{% endif %} {% if loop.first %}current{% endif %}"
+                            data-idx="{{ loop.index0 }}" onclick="goToQuestion({{ loop.index0 }})"
+                            title="第{{ eq.order_num }}题">
+                        {{ eq.order_num }}
+                    </button>
+                    {% endfor %}
+                </div>
+                <div class="mt-2 small">
+                    <span class="badge bg-success">绿</span> 已答
+                    <span class="badge bg-secondary">灰</span> 未答
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+let currentIdx = 0;
+let totalQuestions = {{ eqs|length }};
+let timerInterval;
+let remaining = {{ remaining }};
+let speedMult = {{ speed }};
+
+function formatTime(s) { let m = Math.floor(s/60); let sec = s%60; return String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0'); }
+
+function updateTimerDisplay() {
+    let el = document.getElementById('timerDisplay');
+    el.textContent = formatTime(remaining);
+    el.className = remaining <= 60 ? 'timer-danger' : remaining <= 300 ? 'timer-warning' : '';
+}
+
+function startTimer() {
+    updateTimerDisplay();
+    timerInterval = setInterval(function() {
+        remaining -= (1 * speedMult);
+        if (remaining < 0) remaining = 0;
+        updateTimerDisplay();
+        if (remaining <= 0) {
+            clearInterval(timerInterval);
+            alert('时间到！系统将自动提交');
+            timeoutSubmit();
+        }
+    }, 1000);
+}
+
+function navigate(delta) {
+    goToQuestion(currentIdx + delta);
+}
+
+function goToQuestion(idx) {
+    if (idx < 0 || idx >= totalQuestions) return;
+    document.querySelectorAll('.question-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.question-nav-btn').forEach(b => b.classList.remove('current'));
+    let panel = document.querySelector('.question-panel[data-idx="' + idx + '"]');
+    if (panel) panel.classList.add('active');
+    let navBtn = document.querySelector('.question-nav-btn[data-idx="' + idx + '"]');
+    if (navBtn) navBtn.classList.add('current');
+    currentIdx = idx;
+    // Show submit button only on the last question
+    document.getElementById('submitBtn').style.display = (idx === totalQuestions - 1) ? '' : 'none';
+    saveDraft();
+}
+
+function collectAnswers() {
+    let answers = {};
+    document.querySelectorAll('.question-panel').forEach(panel => {
+        let qid = panel.dataset.qid;
+        let qtype = panel.querySelector('.badge') ? panel.querySelector('.badge').textContent.trim() : '';
+        let answer = '';
+        if (qtype.includes('单选')) {
+            let checked = panel.querySelector('input[type="radio"]:checked');
+            if (checked) answer = checked.value;
+        } else if (qtype.includes('多选')) {
+            let checked = panel.querySelectorAll('input[type="checkbox"]:checked');
+            answer = Array.from(checked).map(c => c.value).join(',');
+        } else if (qtype.includes('判断')) {
+            let checked = panel.querySelector('input[type="radio"]:checked');
+            if (checked) answer = checked.value;
+        } else if (qtype.includes('填空')) {
+            let inp = panel.querySelector('.fill-blank-input');
+            if (inp) answer = inp.value;
+        } else if (qtype.includes('编程')) {
+            let ta = panel.querySelector('.code-input');
+            if (ta) answer = ta.value;
+        }
+        answers[qid] = answer;
+    });
+    return answers;
+}
+
+function saveDraft() {
+    let qid = document.querySelector('.question-panel[data-idx="' + currentIdx + '"]').dataset.qid;
+    let answer = '';
+    let panel = document.querySelector('.question-panel[data-idx="' + currentIdx + '"]');
+    let qtype = panel.querySelector('.badge').textContent.trim();
+    if (qtype.includes('单选') || qtype.includes('判断')) {
+        let checked = panel.querySelector('input[type="radio"]:checked');
+        if (checked) answer = checked.value;
+    } else if (qtype.includes('多选')) {
+        let checked = panel.querySelectorAll('input[type="checkbox"]:checked');
+        answer = Array.from(checked).map(c => c.value).join(',');
+    } else if (qtype.includes('填空')) {
+        let inp = panel.querySelector('.fill-blank-input');
+        if (inp) answer = inp.value;
+    } else if (qtype.includes('编程')) {
+        let ta = panel.querySelector('.code-input');
+        if (ta) answer = ta.value;
+    }
+    fetch('/student/exam/{{ exam.id }}/save_draft', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({question_id: parseInt(qid), answer: answer})
+    });
+    let navBtn = document.querySelector('.question-nav-btn[data-idx="' + currentIdx + '"]');
+    if (answer && navBtn) navBtn.classList.add('answered');
+}
+
+function submitExam() {
+    if (!confirm('确认提交试卷？提交后不可修改。')) return;
+    clearInterval(timerInterval);
+    let answers = collectAnswers();
+    fetch('/student/exam/{{ exam.id }}/submit', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({answers: answers})
+    }).then(r => r.json()).then(d => {
+        if (d.ok) {
+            window.location.href = d.redirect;
+        }
+    });
+}
+
+function timeoutSubmit() {
+    let answers = collectAnswers();
+    fetch('/student/exam/{{ exam.id }}/timeout', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({answers: answers})
+    }).then(r => r.json()).then(d => {
+        if (d.ok) window.location.reload();
+    });
+}
+
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        fetch('/api/tab_switch', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({student_exam_id: parseInt(document.getElementById('studentExamId').value)})
+        });
+    }
+});
+
+document.querySelectorAll('.option-label').forEach(label => {
+    label.addEventListener('click', function(e) {
+        e.preventDefault();
+        let input = this.querySelector('input');
+        if (input) {
+            if (input.type === 'radio') {
+                input.checked = true;
+                document.querySelectorAll('.option-label[data-qid="' + this.dataset.qid + '"]').forEach(l => l.classList.remove('selected'));
+            } else if (input.type === 'checkbox') {
+                input.checked = !input.checked;
+            }
+            this.classList.toggle('selected', input.checked);
+        }
+        let navBtn = document.querySelector('.question-nav-btn[data-idx="' + currentIdx + '"]');
+        if (navBtn) navBtn.classList.add('answered');
+        saveDraft();
+    });
+});
+
+document.querySelectorAll('.fill-blank-input').forEach(inp => {
+    inp.addEventListener('input', function() {
+        let navBtn = document.querySelector('.question-nav-btn[data-idx="' + currentIdx + '"]');
+        if (navBtn) navBtn.classList.toggle('answered', this.value.trim().length > 0);
+    });
+    inp.addEventListener('blur', saveDraft);
+});
+
+document.querySelectorAll('.code-input').forEach(ta => {
+    ta.addEventListener('input', function() {
+        let navBtn = document.querySelector('.question-nav-btn[data-idx="' + currentIdx + '"]');
+        if (navBtn) navBtn.classList.toggle('answered', this.value.trim().length > 0);
+    });
+    ta.addEventListener('blur', saveDraft);
+});
+
+document.querySelectorAll('.run-code-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        let qid = this.dataset.qid;
+        let code = document.querySelector('.code-input[data-qid="' + qid + '"]').value;
+        let output = document.querySelector('.code-output[data-qid="' + qid + '"]');
+        output.innerHTML = '<span style="color:#8892b0;">运行中...</span>';
+        fetch('/student/programming/run', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({code: code, question_id: parseInt(qid)})
+        }).then(r => r.json()).then(d => {
+            if (d.ok && d.results) {
+                let html = '';
+                let allPassed = true;
+                d.results.forEach(function(r, i) {
+                    if (r.error) {
+                        allPassed = false;
+                        html += '<div style="color:#F44336;">测试' + (i+1) + ': <code>' + escHtml(r.call) + '</code></div>';
+                        html += '<div style="color:#F44336; margin-left:12px;">错误: ' + escHtml(r.error) + '</div>';
+                    } else if (r.passed) {
+                        html += '<div style="color:#4CAF50;">测试' + (i+1) + ': ' + escHtml(r.call) + ' ✓</div>';
+                    } else {
+                        allPassed = false;
+                        html += '<div style="color:#F44336;">测试' + (i+1) + ': ' + escHtml(r.call) + ' ✗</div>';
+                        html += '<div style="margin-left:12px; font-size:0.8rem;">期望: ' + escHtml(r.expected) + '</div>';
+                        html += '<div style="margin-left:12px; font-size:0.8rem;">实际: ' + escHtml(r.output || '(无输出)') + '</div>';
+                    }
+                });
+                let summary = allPassed ? '<span style="color:#4CAF50;">全部通过!</span>' : '<span style="color:#FF9800;">部分未通过</span>';
+                output.innerHTML = '<div style="font-weight:bold; margin-bottom:4px;">' + summary + ' (' + d.results.filter(function(r){return r.passed;}).length + '/' + d.results.length + ')</div>' + html;
+            } else if (d.message) {
+                output.innerHTML = '<span style="color:#F44336;">错误: ' + escHtml(d.message) + '</span>';
+            } else {
+                output.textContent = d.output || '(无输出)';
+            }
+        });
+    });
+});
+
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Initialize draft answers for radio/checkbox
+{% for eq in eqs %}
+{% set draft_val = drafts.get(eq.question_id, '') %}
+{% if draft_val and eq.type in ('single_choice', 'true_false') %}
+(function() {
+    let input = document.querySelector('input[name="q_{{ eq.question_id }}"][value="{{ draft_val }}"]');
+    if (input) { input.checked = true; input.closest('.option-label').classList.add('selected'); }
+})();
+{% elif draft_val and eq.type == 'multi_choice' %}
+(function() {
+    let vals = '{{ draft_val }}'.split(',');
+    vals.forEach(function(v) {
+        let input = document.querySelector('input[name="q_{{ eq.question_id }}"][value="' + v.trim() + '"]');
+        if (input) { input.checked = true; input.closest('.option-label').classList.add('selected'); }
+    });
+})();
+{% endif %}
+{% endfor %}
+
+startTimer();
+</script>
+{% endblock %}

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}考试管理{% endblock %}
+{% block content %}
+<h2>考试管理</h2>
+<a href="{{ url_for('create_exam') }}" class="btn btn-primary mb-3">创建新考试</a>
+{% if exams %}
+<table class="table table-hover">
+    <thead>
+        <tr><th>ID</th><th>标题</th><th>状态</th><th>时长(分)</th><th>加速倍率</th><th>创建时间</th><th>操作</th></tr>
+    </thead>
+    <tbody>
+    {% for e in exams %}
+    <tr>
+        <td class="tabular-nums">{{ e.id }}</td>
+        <td>{{ e.title }}</td>
+        <td>
+            {% if e.status == 'draft' %}<span class="badge bg-secondary">草稿</span>
+            {% elif e.status == 'published' %}<span class="badge bg-info">已发布</span>
+            {% elif e.status == 'in_progress' %}<span class="badge bg-warning">进行中</span>
+            {% elif e.status == 'grading' %}<span class="badge bg-primary">判分中</span>
+            {% elif e.status == 'completed' %}<span class="badge bg-success">已完成</span>
+            {% endif %}
+        </td>
+        <td class="tabular-nums">{{ e.duration_minutes }}</td>
+        <td class="tabular-nums">{{ e.speed_multiplier }}x</td>
+        <td>{{ e.created_at[:16] if e.created_at }}</td>
+        <td>
+            <div class="btn-group btn-group-sm">
+                {% if e.status == 'draft' %}
+                <a href="{{ url_for('edit_exam', exam_id=e.id) }}" class="btn btn-outline-secondary">编辑</a>
+                <a href="{{ url_for('publish_exam', exam_id=e.id) }}" class="btn btn-outline-success">发布</a>
+                {% endif %}
+                {% if e.status == 'in_progress' %}
+                <form method="POST" action="{{ url_for('force_end_exam', exam_id=e.id) }}" style="display:inline" onsubmit="return confirm('确认强制结束考试?未提交的学生将被标记为超时')">
+                    <button class="btn btn-outline-danger btn-sm">强制结束</button>
+                </form>
+                {% endif %}
+                <a href="{{ url_for('teacher_exam_results', exam_id=e.id) }}" class="btn btn-outline-primary">成绩</a>
+                {% if e.status in ('completed','grading') %}
+                <a href="{{ url_for('exam_analysis', exam_id=e.id) }}" class="btn btn-outline-info">分析</a>
+                <a href="{{ url_for('code_review', exam_id=e.id) }}" class="btn btn-outline-warning">代码审查</a>
+                <a href="{{ url_for('export_excel', exam_id=e.id) }}" class="btn btn-outline-success">导出Excel</a>
+                {% endif %}
+                <form method="POST" action="{{ url_for('delete_exam', exam_id=e.id) }}" style="display:inline" onsubmit="return confirm('确认删除此考试?该操作不可恢复')">
+                    <button class="btn btn-outline-danger btn-sm">删除</button>
+                </form>
+            </div>
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>暂无考试，点击上方按钮创建。</p>
+{% endif %}
+{% endblock %}

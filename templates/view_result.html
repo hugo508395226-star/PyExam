@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}考试成绩 - {{ exam.title }}{% endblock %}
+{% block content %}
+<h2>{{ exam.title }} - 成绩</h2>
+<div id="statusIndicator">
+{% if se.status == 'submitted' %}
+<div class="alert alert-info">试卷已提交，正在等待判分...
+    <div class="progress mt-2"><div class="progress-bar progress-bar-striped progress-bar-animated" style="width:100%">判分中...</div></div>
+</div>
+{% endif %}
+</div>
+
+{% if se.status == 'graded' %}
+<div class="row">
+    <div class="col-md-4">
+        <div class="card text-center">
+            <div class="card-body">
+                <h1 class="display-3 tabular-nums {% if se.score is not none and total_points > 0 and se.score >= total_points * 0.6 %}text-success{% else %}text-danger{% endif %}">
+                    {{ se.score|round(1) if se.score is not none else '-' }}
+                </h1>
+                <p class="text-muted">总分</p>
+                {% if grade %}
+                <p>客观题: <span class="tabular-nums">{{ grade.objective_score|round(1) }}</span> | 编程题: <span class="tabular-nums">{{ grade.programming_score|round(1) }}</span></p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-8">
+        <div class="card" style="max-height:600px;overflow:auto;">
+            <div class="card-header">答题详情</div>
+            <div class="card-body">
+                {% for eq in eqs %}
+                {% set ans = answers_map.get(eq.question_id) %}
+                <div class="border rounded p-2 mb-2">
+                    <div class="d-flex justify-content-between">
+                        <strong>Q{{ eq.order_num }}. {{ eq.title[:60] }}</strong>
+                        <span>
+                            {% if ans and ans.is_correct %}
+                            <span class="badge bg-success">正确</span>
+                            {% elif ans and ans.score > 0 %}
+                            <span class="badge bg-warning">部分正确</span>
+                            {% else %}
+                            <span class="badge bg-danger">错误</span>
+                            {% endif %}
+                            <small class="tabular-nums">{{ ans.score|round(1) if ans else 0 }}/{{ eq.points }}分</small>
+                        </span>
+                    </div>
+                    {% if eq.type in ('single_choice', 'multi_choice', 'true_false') %}
+                    <p class="mb-1">你的答案: <strong>{{ ans.answer_text if ans else '未作答' }}</strong></p>
+                    <p class="mb-1 text-success">正确答案: {{ eq.correct_answer }}</p>
+                    {% elif eq.type == 'fill_blank' %}
+                    <p class="mb-1">你的答案: <strong>{{ ans.answer_text if ans else '未作答' }}</strong></p>
+                    <p class="mb-1 text-success">参考答案: {{ eq.correct_answer }}</p>
+                    {% elif eq.type == 'programming' %}
+                    <p class="mb-1">得分: <span class="tabular-nums">{{ ans.score|round(1) if ans else 0 }}</span>/{{ eq.points }}</p>
+                    <details><summary>查看你的代码</summary><pre><code>{{ ans.answer_text if ans else '未作答' }}</code></pre></details>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="mt-3">
+    <a href="{{ url_for('student_dashboard') }}" class="btn btn-outline-secondary">返回</a>
+    <a href="{{ url_for('knowledge_graph') }}" class="btn btn-outline-info">查看知识图谱</a>
+    <a href="{{ url_for('wrong_book') }}" class="btn btn-outline-warning">错题本</a>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+{% if se.status == 'submitted' %}
+function pollStatus() {
+    fetch('/api/exam_status/{{ se.id }}').then(r => r.json()).then(d => {
+        if (d.student_status === 'graded') {
+            location.reload();
+        } else {
+            let prog = d.grading_progress || 0;
+            let total = d.grading_total || 0;
+            let pct = total > 0 ? Math.round(prog / total * 100) : 100;
+            document.querySelector('#statusIndicator .progress-bar').style.width = pct + '%';
+            document.querySelector('#statusIndicator .progress-bar').textContent = '判分中: ' + prog + '/' + total + ' 编程题已完成';
+            setTimeout(pollStatus, 3000);
+        }
+    });
+}
+pollStatus();
+{% endif %}
+</script>
+{% endblock %}

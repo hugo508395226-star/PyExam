@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}学生仪表盘{% endblock %}
+{% block content %}
+<h2>我的考试</h2>
+<ul class="nav nav-tabs mb-3" id="examTabs">
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#doneTab">已完成</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#pendingTab">待考/进行中</button></li>
+</ul>
+<div class="tab-content">
+    <div class="tab-pane fade" id="pendingTab">
+        {% if pending %}
+        <div class="row">
+            {% for se in pending %}
+            <div class="col-md-4 mb-3">
+                <div class="card {% if se.status == 'in_progress' %}border-warning{% else %}border-info{% endif %}">
+                    <div class="card-body">
+                        <h5 class="card-title">{{ se.title }}</h5>
+                        <p>时长: <span class="tabular-nums">{{ se.duration_minutes }}</span>分钟 {% if se.speed_multiplier > 1 %}<span class="badge bg-warning">{{ se.speed_multiplier }}x加速</span>{% endif %}</p>
+                        {% if se.end_time %}<p>截止: {{ se.end_time[:16] }}</p>{% endif %}
+                        {% if se.status == 'in_progress' %}
+                        <a href="{{ url_for('take_exam', exam_id=se.exam_id) }}" class="btn btn-warning">继续答题</a>
+                        {% else %}
+                        <form method="POST" action="{{ url_for('start_exam', exam_id=se.exam_id) }}">
+                            <button type="submit" class="btn btn-primary">开始考试</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted">暂无待考考试</p>
+        {% endif %}
+    </div>
+    <div class="tab-pane fade show active" id="doneTab">
+        {% if completed %}
+        <table class="table table-hover">
+            <thead><tr><th>考试</th><th>状态</th><th>分数</th><th>提交时间</th><th>操作</th></tr></thead>
+            <tbody>
+            {% for se in completed %}
+            <tr>
+                <td>{{ se.title }}</td>
+                <td>
+                    {% if se.status == 'graded' %}<span class="badge bg-success">已出分</span>
+                    {% elif se.status == 'submitted' %}<span class="badge bg-info">已提交</span>
+                    {% elif se.status == 'timeout' %}<span class="badge bg-danger">超时</span>
+                    {% endif %}
+                </td>
+                <td class="tabular-nums"><strong>{{ se.score|round(1) if se.score is not none else '-' }}</strong></td>
+                <td>{{ se.submit_time[:16] if se.submit_time }}</td>
+                <td><a href="{{ url_for('view_result', student_exam_id=se.id) }}" class="btn btn-sm btn-outline-primary">查看详情</a></td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted">暂无已完成考试</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
